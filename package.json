@@ -1,0 +1,15 @@
+{
+  "name": "mastering-solana",
+  "version": "1.0.0",
+  "description": "",
+  "license": "ISC",
+  "author": "namansharma",
+  "type": "commonjs",
+  "main": "index.ts",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "dependencies": {
+    "@solana/kit": "^6.1.0"
+  }
+}
