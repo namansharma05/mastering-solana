@@ -8,6 +8,7 @@
   "main": "index.ts",
   "scripts": {
     "one": "tsx src/1-connect-to-a-solana-environment/index.ts",
+    "two": "tsx src/2-interact-with-a-solana-environment/index.ts",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "dependencies": {
