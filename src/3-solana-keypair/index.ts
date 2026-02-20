@@ -1,70 +1,98 @@
 import {
-  address,
   createKeyPairSignerFromBytes,
   generateKeyPairSigner,
   getBase58Decoder,
   getBase58Encoder,
-  getUtf8Decoder,
   getUtf8Encoder,
   isOffCurveAddress,
   signBytes,
   verifySignature,
 } from "@solana/kit";
 import fs from "fs";
-import bs58 from "bs58";
 
-const randomKeypair = await generateKeyPairSigner();
-console.log(`Random Keypair: ${randomKeypair.address}`, randomKeypair);
+// Create a Random Signer Keypair
+const randomSignerKeypair = await generateKeyPairSigner();
+console.log(`Random Signer Keypair Address: ${randomSignerKeypair.address}`);
 
-const privateKeyArrayBase58 = JSON.parse(
-  fs.readFileSync("./src/wallet/id/nam.json", "utf-8"),
-) as number[];
-console.log(`Priavte Key Array Base 58: ${typeof privateKeyArrayBase58}`); // Object
-
-const privateKeyBytes = new Uint8Array(privateKeyArrayBase58);
-console.log(`Private Key Bytes: ${typeof privateKeyBytes}`); // Object
-
-const restorePrivateKeyArrayBase58 =
-  await createKeyPairSignerFromBytes(privateKeyBytes);
+// Restore a Signer Keypair from Array of Bytes Private Key
+const restoreSignerKeypairFromPrivateKeyArrayBytes =
+  await createKeyPairSignerFromBytes(
+    new Uint8Array(
+      JSON.parse(
+        fs.readFileSync("./src/wallet/id/nam.json", "utf-8"),
+      ) as number[],
+    ),
+  );
 console.log(
-  `Restored Private Key Address from Base 58 Array: ${restorePrivateKeyArrayBase58.address}`,
-); // final output
-
-const privateKeyBase58String = fs
-  .readFileSync("./src/wallet/id/pri.json")
-  .toString();
-const privateKeyBase58Slice = privateKeyBase58String.slice(
-  1,
-  privateKeyBase58String.length - 1,
-);
-console.log(`Private Key Base 58: `, typeof privateKeyBase58Slice); // string
-
-const restoredSigner58 = await createKeyPairSignerFromBytes(
-  getBase58Encoder().encode(privateKeyBase58Slice),
+  `Restore Singer Keypair From Array Bytes Privatekey: ${restoreSignerKeypairFromPrivateKeyArrayBytes.address}`,
 );
 
-const primaryWalletAddress = address(restoredSigner58.address);
-console.log(`Off curve: `, isOffCurveAddress(primaryWalletAddress));
+// Restore a Signer Keypair from String Private Key
+const restoreSignerKeypairFromPrivateKeyString =
+  await createKeyPairSignerFromBytes(
+    new Uint8Array(
+      getBase58Encoder().encode(
+        JSON.parse(fs.readFileSync("./src/wallet/id/pri.json", "utf-8")),
+      ),
+    ),
+  );
+console.log(
+  `Restore Signer Keypair From String Privatekey: ${restoreSignerKeypairFromPrivateKeyString.address}`,
+);
 
+// Verify if a keypair is valid Public Key and is on Ed25519 Curve
+var isOffCurve = isOffCurveAddress(randomSignerKeypair.address);
+console.log(`${randomSignerKeypair.address} is Off Curve? : ${isOffCurve}`);
+isOffCurve = isOffCurveAddress(
+  restoreSignerKeypairFromPrivateKeyArrayBytes.address,
+);
+console.log(
+  `${restoreSignerKeypairFromPrivateKeyArrayBytes.address} is Off Curve? : ${isOffCurve}`,
+);
+isOffCurve = isOffCurveAddress(
+  restoreSignerKeypairFromPrivateKeyString.address,
+);
+console.log(
+  `${restoreSignerKeypairFromPrivateKeyString.address} is Off Curve? : ${isOffCurve}`,
+);
+
+// Sign a message with our Keypair
 const message = getUtf8Encoder().encode("Hello, Solana World!");
-console.log(`Encoded Message: ${message}`); // array of bytes
+console.log(`Encoded message: ${message}`);
 
 const signedBytes = await signBytes(
-  restoredSigner58.keyPair.privateKey,
+  restoreSignerKeypairFromPrivateKeyArrayBytes.keyPair.privateKey,
   message,
 );
-console.log(
-  `Restored Signer 58 private key: `,
-  restoredSigner58.keyPair.privateKey,
-); // private key not extractable using this method or any method
-console.log(`Signed Bytes: ${signedBytes}`); // array of bytes
+console.log(`Signed Bytes: ${signedBytes}`);
 
-const decodedMessage = getBase58Decoder().decode(signedBytes);
-console.log(`Decoded Message: ${decodedMessage}`); // message signature
+const decodeSignedBytes = getBase58Decoder().decode(signedBytes);
+console.log(`Decoded Signed Bytes to Base58: ${decodeSignedBytes}`);
 
-const verifySign = await verifySignature(
-  restoredSigner58.keyPair.publicKey,
+// verify if the message is signed using a particular keypair
+var verified = await verifySignature(
+  randomSignerKeypair.keyPair.publicKey,
   signedBytes,
   message,
 );
-console.log(`Verified Signature: ${verifySign}`);
+console.log(
+  `Message was signed by ${randomSignerKeypair.address} : ${verified}`,
+);
+
+verified = await verifySignature(
+  restoreSignerKeypairFromPrivateKeyArrayBytes.keyPair.publicKey,
+  signedBytes,
+  message,
+);
+console.log(
+  `Message was signed by ${restoreSignerKeypairFromPrivateKeyArrayBytes.address} : ${verified}`,
+);
+
+verified = await verifySignature(
+  restoreSignerKeypairFromPrivateKeyString.keyPair.publicKey,
+  signedBytes,
+  message,
+);
+console.log(
+  `Message was signed by ${restoreSignerKeypairFromPrivateKeyString.address} : ${verified}`,
+);
