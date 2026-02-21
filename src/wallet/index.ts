@@ -1,12 +1,29 @@
-import { createKeyPairSignerFromBytes, type KeyPairSigner } from "@solana/kit";
+import {
+  createKeyPairSignerFromBytes,
+  getBase58Encoder,
+  type KeyPairSigner,
+} from "@solana/kit";
 import fs from "fs";
 import path from "path";
-import bs58 from "bs58";
 
-export async function loadSignerFromFile(file: string = "pri.json"): Promise<KeyPairSigner<string>> {
-    const resolvedPath = path.resolve(`./src/wallet/id/${file}`);
-    const loadedKeyBytes = Uint8Array.from(bs58.decode(JSON.parse(fs.readFileSync(resolvedPath, "utf8"))));
+export async function loadSignerFromFile(
+  file: string = "pri.json",
+): Promise<KeyPairSigner<string>> {
+  const resolvedPath = path.resolve(`./src/wallet/id/${file}`);
+  const fileData = JSON.parse(fs.readFileSync(resolvedPath, "utf-8"));
+  var loadedKeyBytes;
+  if (typeof fileData === "string") {
+    loadedKeyBytes = Uint8Array.from(
+      getBase58Encoder().encode(
+        JSON.parse(fs.readFileSync(resolvedPath, "utf8")),
+      ),
+    );
+  } else {
+    loadedKeyBytes = new Uint8Array(
+      JSON.parse(fs.readFileSync(resolvedPath, "utf-8")) as number[],
+    );
+  }
 
-    const keypairSigner = await createKeyPairSignerFromBytes(loadedKeyBytes);
-    return keypairSigner;
+  const keypairSigner = await createKeyPairSignerFromBytes(loadedKeyBytes);
+  return keypairSigner;
 }
