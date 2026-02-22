@@ -14,6 +14,7 @@
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "dependencies": {
+    "@solana-program/compute-budget": "^0.13.0",
     "@solana-program/memo": "^0.11.0",
     "@solana-program/system": "^0.12.0",
     "@solana/kit": "^6.1.0",

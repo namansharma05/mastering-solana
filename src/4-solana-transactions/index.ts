@@ -4,17 +4,22 @@ import {
   createSolanaRpcSubscriptions,
   createTransactionMessage,
   getCompiledTransactionMessageDecoder,
+  isSolanaError,
   lamports,
   pipe,
+  prependTransactionMessageInstructions,
+  sendTransactionWithoutConfirmingFactory,
   setTransactionMessageFeePayerSigner,
   setTransactionMessageLifetimeUsingBlockhash,
   signTransactionMessageWithSigners,
+  SOLANA_ERROR__BLOCK_HEIGHT_EXCEEDED,
   TransactionMessageBytes,
 } from "@solana/kit";
 import { config } from "../config";
 import { loadSignerFromFile } from "../wallet/index";
 import { getTransferSolInstruction } from "@solana-program/system";
 import { getAddMemoInstruction } from "@solana-program/memo";
+import { estimateComputeUnitLimitFactory, getSetComputeUnitLimitInstruction, getSetComputeUnitPriceInstruction } from "@solana-program/compute-budget";
 
 const rpc = createSolanaRpc(config.RPC_HTTP);
 const rpcSubscription = createSolanaRpcSubscriptions(config.RPC_WS);
@@ -69,12 +74,36 @@ const transactionMessage = await pipe(
     ),
 );
 
+
+const estimateComputeUnitLimit = estimateComputeUnitLimitFactory({rpc});
+const computeUnitsEstimated = await estimateComputeUnitLimit(transactionMessage);
+console.log(`Estimated Compute Units: ${computeUnitsEstimated} CU`);
+
+const budgetedTransactionMessage = prependTransactionMessageInstructions(
+  [getSetComputeUnitLimitInstruction({units: computeUnitsEstimated})],
+  transactionMessage
+);
+
+const prioTransactionMessage = appendTransactionMessageInstructions(
+  [getSetComputeUnitLimitInstruction({units: computeUnitsEstimated * 1.1}), getSetComputeUnitPriceInstruction({microLamports: 1_000_000})],
+  transactionMessage
+)
+
 const signedTransaction =
-  await signTransactionMessageWithSigners(transactionMessage);
-console.log(`Signed Transaction: ${signedTransaction}`);
+  await signTransactionMessageWithSigners(prioTransactionMessage);
+console.log(`Signed Transaction: `,signedTransaction);
 
 const compiledMessage = getCompiledTransactionMessageDecoder().decode(
   signedTransaction.messageBytes as TransactionMessageBytes,
 );
-console.log(`Compiled Singed Transaction Message: ${compiledMessage}`);
+console.log(`Compiled Singed Transaction Message: `, compiledMessage);
 
+try {
+  await sendTransactionWithoutConfirmingFactory({rpc})(signedTransaction, {commitment: "confirmed", skipPreflight: true});
+} catch (error) {
+  if(isSolanaError(error, SOLANA_ERROR__BLOCK_HEIGHT_EXCEEDED)) {
+    console.error("This transaction depends on a blockhash that has expired");
+  } else {
+    throw error;
+  }
+}
