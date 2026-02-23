@@ -3,7 +3,6 @@ import {
   createSolanaRpc,
   createSolanaRpcSubscriptions,
   createTransactionMessage,
-  getCompiledTransactionMessageDecoder,
   isSolanaError,
   lamports,
   pipe,
@@ -13,23 +12,32 @@ import {
   setTransactionMessageLifetimeUsingBlockhash,
   signTransactionMessageWithSigners,
   SOLANA_ERROR__BLOCK_HEIGHT_EXCEEDED,
-  TransactionMessageBytes,
 } from "@solana/kit";
 import { config } from "../config";
-import { loadSignerFromFile } from "../wallet/index";
+import { loadSignerFromFile } from "../wallet";
 import { getTransferSolInstruction } from "@solana-program/system";
 import { getAddMemoInstruction } from "@solana-program/memo";
-import { estimateComputeUnitLimitFactory, getSetComputeUnitLimitInstruction, getSetComputeUnitPriceInstruction } from "@solana-program/compute-budget";
+import {
+  estimateComputeUnitLimitFactory,
+  getSetComputeUnitLimitInstruction,
+  getSetComputeUnitPriceInstruction,
+} from "@solana-program/compute-budget";
 
+// connect with solana cluster
 const rpc = createSolanaRpc(config.RPC_HTTP);
 const rpcSubscription = createSolanaRpcSubscriptions(config.RPC_WS);
 
+// sender and receiver wallets
 const wallet = await loadSignerFromFile(); // 29KKX9fQspSenNUibR9fxJCLvwGfozFPGbt486SF8JqY
 const receiver = await loadSignerFromFile("nam.json"); // NamnBppe88Kw1Nm9owQ7DFtScUKR2nkq6w48YesZDa3
 
+// amount of sol to transfer from wallet to receiver address
 const transferAmount = lamports(config.LAMPORTS_PER_SOL / 100n); // 0.01 SOL
-const memoMessage = "Hello, Solana Transactions!";
 
+// memo message
+const memoMessage = "Hello, Solana Transaction!";
+
+// subscribe to log notifications
 const abortController = new AbortController();
 const notifications = await rpcSubscription
   .logsNotifications(
@@ -47,62 +55,73 @@ const notifications = await rpcSubscription
       `Transaction found: https://solscan.io/tx/${notification.value.signature}`,
       notification.value.logs,
     );
-    if (logContainsMemo) {
-      abortController.abort();
-    }
+    if (logContainsMemo) abortController.abort();
   }
 })();
 
-const { value: latestBlockhash } = await rpc.getLatestBlockhash().send();
-
-const transferInstruction = getTransferSolInstruction({
+// transfer sol Instruction
+const transferSolInstruction = getTransferSolInstruction({
   source: wallet,
   destination: receiver.address,
   amount: transferAmount,
 });
 
-const memoInstruction = getAddMemoInstruction({ memo: memoMessage });
+// memo message instruction
+const memoInstruction = getAddMemoInstruction({
+  memo: memoMessage,
+});
 
+// latest blockhash
+const { value: latestBlockhash } = await rpc.getLatestBlockhash().send();
+
+// transaction message
 const transactionMessage = await pipe(
   createTransactionMessage({ version: "legacy" }),
   (tx) => setTransactionMessageFeePayerSigner(wallet, tx),
   (tx) => setTransactionMessageLifetimeUsingBlockhash(latestBlockhash, tx),
   (tx) =>
     appendTransactionMessageInstructions(
-      [transferInstruction, memoInstruction],
+      [transferSolInstruction, memoInstruction],
       tx,
     ),
 );
 
+// simulation to get the exact compute units
+const computeUnitsEstimate = await estimateComputeUnitLimitFactory({ rpc })(
+  transactionMessage,
+);
+console.log(`Compute Units Estimate: ${computeUnitsEstimate} CU`);
 
-const estimateComputeUnitLimit = estimateComputeUnitLimitFactory({rpc});
-const computeUnitsEstimated = await estimateComputeUnitLimit(transactionMessage);
-console.log(`Estimated Compute Units: ${computeUnitsEstimated} CU`);
-
-const budgetedTransactionMessage = prependTransactionMessageInstructions(
-  [getSetComputeUnitLimitInstruction({units: computeUnitsEstimated})],
-  transactionMessage
+// transaction message with compute units
+const budgetTransactionMessage = prependTransactionMessageInstructions(
+  [getSetComputeUnitLimitInstruction({ units: computeUnitsEstimate })],
+  transactionMessage,
 );
 
-const prioTransactionMessage = appendTransactionMessageInstructions(
-  [getSetComputeUnitLimitInstruction({units: computeUnitsEstimated * 1.1}), getSetComputeUnitPriceInstruction({microLamports: 1_000_000})],
-  transactionMessage
-)
-
-const signedTransaction =
-  await signTransactionMessageWithSigners(prioTransactionMessage);
-console.log(`Signed Transaction: `,signedTransaction);
-
-const compiledMessage = getCompiledTransactionMessageDecoder().decode(
-  signedTransaction.messageBytes as TransactionMessageBytes,
+// adding a priority fee with compute units in transaction message
+const prioTransactionMessage = prependTransactionMessageInstructions(
+  [
+    getSetComputeUnitLimitInstruction({ units: computeUnitsEstimate * 1.1 }),
+    getSetComputeUnitPriceInstruction({ microLamports: 1_000_000 }),
+  ],
+  transactionMessage,
 );
-console.log(`Compiled Singed Transaction Message: `, compiledMessage);
 
+// sign transaction
+const signedTransaction = await signTransactionMessageWithSigners(
+  prioTransactionMessage,
+);
+console.log(`transaction signature: `, signedTransaction);
+
+// send transaction
 try {
-  await sendTransactionWithoutConfirmingFactory({rpc})(signedTransaction, {commitment: "confirmed", skipPreflight: true});
+  await sendTransactionWithoutConfirmingFactory({ rpc })(signedTransaction, {
+    commitment: "confirmed",
+    skipPreflight: true,
+  });
 } catch (error) {
-  if(isSolanaError(error, SOLANA_ERROR__BLOCK_HEIGHT_EXCEEDED)) {
-    console.error("This transaction depends on a blockhash that has expired");
+  if (isSolanaError(error, SOLANA_ERROR__BLOCK_HEIGHT_EXCEEDED)) {
+    console.error(`Block hash height exceeded`);
   } else {
     throw error;
   }
