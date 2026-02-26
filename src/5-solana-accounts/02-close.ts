@@ -4,79 +4,83 @@ import {
   createSolanaRpc,
   createSolanaRpcSubscriptions,
   createTransactionMessage,
-  isSolanaError,
+  isOffCurveAddress,
   pipe,
   sendAndConfirmTransactionFactory,
-  sendTransactionWithoutConfirmingFactory,
   setTransactionMessageFeePayerSigner,
   setTransactionMessageLifetimeUsingBlockhash,
   signTransactionMessageWithSigners,
 } from "@solana/kit";
 import { config } from "../config";
 import { loadSignerFromFile } from "../wallet";
-import { TOKEN_PROGRAM_ID } from "@solana/spl-token";
-import { getBurnCheckedInstruction, getCloseAccountInstruction } from "@solana-program/token";
+import {
+  getBurnCheckedInstruction,
+  getCloseAccountInstruction,
+} from "@solana-program/token";
 
+// connection to cluster
 const rpc = createSolanaRpc(config.RPC_HTTP);
 const rpcSubscriptions = createSolanaRpcSubscriptions(config.RPC_WS);
 
-const wallet = await loadSignerFromFile();
-const accountToClose = address("HxGmL2szj2Ztr6A3REyYPPc9uCMEdYJYW6EKtewRvtyK");
+// primary wallet
+const wallet = await loadSignerFromFile(); // 29KKX9fQspSenNUibR9fxJCLvwGfozFPGbt486SF8JqY
+// ATA to close
+const tokenAccountToClose = address(
+  "HxGmL2szj2Ztr6A3REyYPPc9uCMEdYJYW6EKtewRvtyK",
+);
+// mint address
 const mintAddress = address("4k3Dyjzvzp8eMZWUXbBCjEvwSkkk59S5iCNLY3QrkX6R");
 
+// latest blockhash
 const { value: latestBlockhash } = await rpc.getLatestBlockhash().send();
 
-// Get the token account we're closing
-const { value: accountInfo } = await rpc
-  .getAccountInfo(accountToClose, {
-    encoding: "jsonParsed",
-  })
+// get the token account to transfer the tokens to
+const receiverTokenAccounts = await rpc
+  .getTokenAccountsByOwner(
+    wallet.address,
+    { programId: address("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA") },
+    { encoding: "jsonParsed" },
+  )
   .send();
 
-if (!accountInfo) {
-  console.error("Account not found!");
-  process.exit(1);
-}
+// getting all the token addresses associated with an owner (29KKX9fQspSenNUibR9fxJCLvwGfozFPGbt486SF8JqY)
+const receiverTokenAddress = receiverTokenAccounts.value.find(
+  (item) =>
+    item.account.data.parsed &&
+    "info" in item.account.data.parsed &&
+    item.account.data.parsed.info.mint === mintAddress,
+);
 
-console.log("Account Info:", accountInfo);
-const solBalance = Number(accountInfo.lamports) / Number(config.LAMPORTS_PER_SOL);
-console.log(`SOL Balance: ${solBalance} SOL`);
-console.log("Wallet address:", wallet.address);
+// verifying if the received token addres is the actual account to close
+console.log(
+  "Verified Token Address: ",
+  receiverTokenAddress?.pubkey === tokenAccountToClose
+    ? "Verified"
+    : "Not Verified",
+);
 
-// Parse the token account data to get token amount
-const parsedData = (accountInfo.data as any).parsed;
-const tokenAmount = BigInt(parsedData.info.tokenAmount.amount);
-const tokenDecimal = parsedData.info.tokenAmount.decimals;
-const tokenOwner = address(parsedData.info.owner);
+// get the token amount and token decimal
+const tokenAmount =
+  receiverTokenAddress?.account.data.parsed.info.tokenAmount.amount ?? 0n;
+const tokenDecimals =
+  receiverTokenAddress?.account.data.parsed.info.tokenAmount.decimals ?? 6;
 
-console.log("Token Amount:", tokenAmount.toString());
-console.log("Token Decimals:", tokenDecimal);
-console.log("Token Owner:", tokenOwner);
-
-// Verify the wallet owns this account
-if (tokenOwner !== wallet.address) {
-  console.error("Wallet does not own this token account!");
-  process.exit(1);
-}
-
-// Create burn instruction
+// burning tokens before closing ATA account
 const burnInstruction = getBurnCheckedInstruction({
-  account: accountToClose,
+  account: tokenAccountToClose,
   mint: mintAddress,
   authority: wallet.address,
-  amount: tokenAmount,
-  decimals: tokenDecimal,
+  amount: BigInt(tokenAmount),
+  decimals: tokenDecimals,
 });
-
-// Create close account instruction
+// close account instruction
 const closeAccountInstruction = getCloseAccountInstruction({
-  account: accountToClose,
+  account: tokenAccountToClose,
   destination: wallet.address,
   owner: wallet,
 });
 
-console.log("Instructions created");
-
+// tranaction close message
 const transactionCloseMessage = pipe(
   createTransactionMessage({ version: 0 }),
   (tx) => setTransactionMessageFeePayerSigner(wallet, tx),
@@ -88,21 +92,18 @@ const transactionCloseMessage = pipe(
     ),
 );
 
+// signing transaction
 const signedTransaction = await signTransactionMessageWithSigners(
   transactionCloseMessage,
 );
 
-console.log("Transaction signed, sending...");
-
 try {
-  await sendTransactionWithoutConfirmingFactory({ rpc })(
-    signedTransaction,
+  // sending and confirming transaction
+  await sendAndConfirmTransactionFactory({ rpc, rpcSubscriptions })(
+    { ...signedTransaction, lifetimeConstraint: latestBlockhash },
     { commitment: "confirmed" },
   );
 } catch (e) {
-  console.error("❌ Transaction failed:", isSolanaError(e) ? e.message : String(e));
-  if (isSolanaError(e) && e.context) {
-    console.error("Error context:", e.context);
-  }
+  // catching error
   throw e;
 }
